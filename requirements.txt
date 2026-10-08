@@ -1,0 +1,52 @@
+# Pinned to versions actually verified working together during development
+# (see RESEARCH_NOTES.md "Verification log" for exact test commands/output).
+# Python 3.12 required overall (see note below) -- gymnasium-robotics alone
+# would tolerate 3.10+, but lerobot (needed for imitation_act/imitation_diffusion)
+# requires >=3.12, so start with 3.12 even if you only plan to use scripted_ik,
+# to avoid needing a second venv later.
+
+# ===================================================================
+# BASE -- required for everything: scripted_ik, envs/, rl_grasp,
+# and demo collection for imitation_act/imitation_diffusion.
+# No GPU, no torch. This alone is enough to run scripted_ik end to end.
+# ===================================================================
+mujoco==3.2.7
+gymnasium[mujoco]==1.3.0
+gymnasium-robotics==1.4.2
+numpy>=2.0.0,<2.3.0
+# ^ upper bound is REQUIRED once lerobot is installed too (lerobot 0.6.1 pins
+#   numpy<2.3.0) -- if you only ever use the BASE group you can drop this
+#   bound, but pinning it from the start avoids a surprise downgrade later.
+imageio==2.37.4
+imageio-ffmpeg==0.6.0
+# ^ imageio alone has no mp4 codec backend -- without this, any --render video
+#   path (pick_place_scripted.py, evaluate.py) fails with "Could not find a
+#   backend to open ... with iomode wI". This bundles its own ffmpeg binary,
+#   no system ffmpeg/brew install required. See RESEARCH_NOTES.md section 5.
+pillow==12.3.0
+
+# ===================================================================
+# rl_grasp -- Stable-Baselines3 PPO. Pulls in PyTorch (CPU wheel is fine,
+# no GPU needed for the reach task; pick_place will be slow on CPU but works).
+# ===================================================================
+stable-baselines3==2.9.0
+
+# ===================================================================
+# imitation_act / imitation_diffusion -- LeRobot. HEAVY (pulls PyTorch,
+# torchvision, and eventually a ResNet18 backbone download on first training
+# run). CPU works for the tiny-dataset smoke tests this repo is scaled for;
+# a real training run to convergence is much faster with a GPU but not
+# required to make the pipeline work.
+#
+# Installed via extras rather than plain `lerobot`, because the base
+# install alone is missing pieces each policy needs:
+#   pip install "lerobot[training]"   # ACT + the core training loop (adds `accelerate`)
+#   pip install "lerobot[diffusion]"  # + `diffusers`, only if you're doing imitation_diffusion
+#
+# Exact versions verified working together (installed automatically by the
+# extras above, listed here for reference / troubleshooting version drift):
+#   lerobot==0.6.1
+#   torch==2.11.0
+#   torchvision==0.26.0
+#   accelerate==1.15.0
+#   diffusers==0.39.0          (imitation_diffusion only)

@@ -1,0 +1,136 @@
+<mujoco model="simple_arm_scene">
+  <!--
+    Self-contained 5-DOF arm + 2-finger gripper, a table, and a graspable box,
+    written from scratch for the scripted_ik approach so it does not depend
+    on any external mesh/asset downloads (MuJoCo Menagerie, etc.) - keeps
+    the "guaranteed-working, zero heavy dependencies" reference approach
+    exactly that. All geoms are primitives (box/capsule/cylinder).
+
+    Joint layout (see ik_solver.py's ARM_JOINT_NAMES, must match):
+      0 base_yaw      hinge about z  - sets reach azimuth
+      1 shoulder      hinge about y  - shoulder pitch
+      2 elbow         hinge about y
+      3 wrist_pitch   hinge about y
+      4 wrist_roll    hinge about x
+    Plus 2 independent finger slide joints (left_finger, right_finger),
+    driven directly (no mimic/tendon) - pick_place_scripted.py sets both to
+    the same value for a symmetric open/close.
+
+    All arm actuators are <position> (position-controlled): the IK solver
+    computes a target joint angle each step and writes it as the actuator
+    setpoint; MuJoCo's own position servo + physics does the rest. This is
+    the standard, simplest way to drive IK output into a MuJoCo scene without
+    also hand-rolling a torque-level PD loop.
+  -->
+  <compiler angle="radian"/>
+  <option timestep="0.002" gravity="0 0 -9.81" integrator="implicitfast"/>
+
+  <default>
+    <joint damping="1.0" armature="0.05"/>
+    <geom friction="1.2 0.01 0.001" condim="4"/>
+    <!-- kp/kv raised from an initial 60/6 after a real bug found during
+         development: at 60/6 the arm sagged under gravity (no gravity
+         compensation is implemented - this is a pure position servo), so
+         the IK's computed joint targets and the arm's actual settled pose
+         differed by several centimeters, enough to miss the grasp entirely.
+         300/20 holds the commanded pose closely enough for a 0.04m-wide box
+         with a few mm of tolerance - see RESEARCH_NOTES.md "Verification
+         log". A member extending this to a heavier arm/payload should
+         re-check this the same way (print target vs. settled end-effector
+         position) rather than assuming any fixed gain works. -->
+    <position kp="300" kv="20"/>
+    <default class="finger">
+      <joint damping="2.0" armature="0.01"/>
+      <position kp="200" kv="10" ctrlrange="-0.015 0.04"/>
+    </default>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.5 0.6 0.7" rgb2="0.05 0.05 0.1" width="64" height="64"/>
+    <texture type="2d" name="groundplane" builtin="checker" mark="edge" rgb1="0.3 0.3 0.3" rgb2="0.4 0.4 0.4" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5" reflectance="0.1"/>
+    <material name="table_mat" rgba="0.55 0.4 0.28 1"/>
+    <material name="arm_mat" rgba="0.2 0.4 0.8 1"/>
+    <material name="gripper_mat" rgba="0.2 0.2 0.2 1"/>
+    <material name="box_mat" rgba="0.85 0.15 0.1 1"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 2.5" dir="0 0 -1" directional="true" diffuse="0.8 0.8 0.8"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="groundplane"/>
+
+    <!-- Table: top surface at z = 0.4. Placed at -x: with all arm joint
+         angles at 0 the arm points straight up (a kinematic singularity,
+         see ik_solver.py's reset_to_ready_pose docstring for why); bending
+         the shoulder/elbow with this axis convention swings the tip toward
+         -x, so the workspace is set up on that side rather than fighting
+         the sign convention. -->
+    <geom name="table" type="box" pos="-0.45 0 0.2" size="0.35 0.35 0.2" material="table_mat"/>
+
+    <!-- Graspable box target. Free joint so it can be picked up and moved. -->
+    <body name="target_box" pos="-0.5 0.1 0.43">
+      <freejoint name="target_box_joint"/>
+      <geom name="target_box_geom" type="box" size="0.02 0.02 0.02" material="box_mat" mass="0.05"/>
+    </body>
+
+    <!-- Arm base pedestal, fixed to the world, mounted at the table edge. -->
+    <body name="arm_base" pos="0 0 0.4">
+      <geom name="base_geom" type="cylinder" size="0.06 0.05" pos="0 0 0.05" rgba="0.3 0.3 0.3 1"/>
+
+      <body name="shoulder_link" pos="0 0 0.1">
+        <joint name="base_yaw" type="hinge" axis="0 0 1" range="-3.14 3.14"/>
+        <geom type="cylinder" size="0.045 0.06" pos="0 0 0.06" material="arm_mat"/>
+
+        <body name="upper_arm_link" pos="0 0 0.12">
+          <joint name="shoulder" type="hinge" axis="0 1 0" range="-1.8 1.8"/>
+          <geom type="capsule" fromto="0 0 0 0 0 0.28" size="0.035" material="arm_mat"/>
+
+          <body name="forearm_link" pos="0 0 0.28">
+            <joint name="elbow" type="hinge" axis="0 1 0" range="-2.6 0.0"/>
+            <geom type="capsule" fromto="0 0 0 0 0 0.24" size="0.03" material="arm_mat"/>
+
+            <body name="wrist_link" pos="0 0 0.24">
+              <joint name="wrist_pitch" type="hinge" axis="0 1 0" range="-1.8 1.8"/>
+              <geom type="capsule" fromto="0 0 0 0 0 0.08" size="0.025" material="arm_mat"/>
+
+              <body name="gripper_mount" pos="0 0 0.08">
+                <joint name="wrist_roll" type="hinge" axis="0 0 1" range="-3.14 3.14"/>
+                <geom type="box" size="0.03 0.03 0.02" material="gripper_mat"/>
+                <!-- Moved from local z=0.06 (the gripper mount's own body) to z=0.10
+                     after a real bug found during development: the finger
+                     geoms span local z=[0.05,0.14] (pad center 0.095, half-
+                     extent 0.045), so a site at 0.06 was near the finger
+                     BASE, not between the pads - IK would drive the actual
+                     fingertips ~4-8cm away from where the arithmetic assumed
+                     the "end effector" was. 0.10 sits inside the pad span,
+                     close to the fingertip end, which is what you want when
+                     grasping a small object resting on a surface below.
+                     See RESEARCH_NOTES.md "Verification log". -->
+                <site name="end_effector" pos="0 0 0.10" size="0.008" rgba="0 1 0 1"/>
+
+                <body name="left_finger" pos="0.02 0 0.05">
+                  <joint name="left_finger_joint" type="slide" axis="1 0 0" range="-0.015 0.04" class="finger"/>
+                  <geom name="left_finger_geom" type="box" size="0.008 0.012 0.045" pos="0 0 0.045" material="gripper_mat" friction="1.5 0.01 0.001"/>
+                </body>
+                <body name="right_finger" pos="-0.02 0 0.05">
+                  <joint name="right_finger_joint" type="slide" axis="-1 0 0" range="-0.015 0.04" class="finger"/>
+                  <geom name="right_finger_geom" type="box" size="0.008 0.012 0.045" pos="0 0 0.045" material="gripper_mat" friction="1.5 0.01 0.001"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="act_base_yaw" joint="base_yaw"/>
+    <position name="act_shoulder" joint="shoulder"/>
+    <position name="act_elbow" joint="elbow"/>
+    <position name="act_wrist_pitch" joint="wrist_pitch"/>
+    <position name="act_wrist_roll" joint="wrist_roll"/>
+    <position name="act_left_finger" joint="left_finger_joint" class="finger"/>
+    <position name="act_right_finger" joint="right_finger_joint" class="finger"/>
+  </actuator>
+</mujoco>
