@@ -42,6 +42,13 @@ Verify the complete imitation-learning simulation pipeline before moving to real
 
 ## Training Runs
 
+### 20,000-Step Evaluation
+- Episodes: 20
+- Successes: X/20
+- Success rate: Y%
+- Evaluation video stored locally at `outputs/eval_act_20000.mp4`
+- Main observed failures: TBD
+
 ### Smoke Test
 - Steps: 50
 - Result: training completed successfully
