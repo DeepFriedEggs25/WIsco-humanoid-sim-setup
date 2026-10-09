@@ -44,8 +44,8 @@ Verify the complete imitation-learning simulation pipeline before moving to real
 
 ### 20,000-Step Evaluation
 - Episodes: 20
-- Successes: X/20
-- Success rate: Y%
+- Successes: 6/20
+- Success rate: 30%
 - Evaluation video stored locally at `outputs/eval_act_20000.mp4`
 - Main observed failures: TBD
 
